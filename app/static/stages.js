@@ -210,4 +210,242 @@ function archive({history,run}) {
     ['持续门槛',`${run.sustained_hours} h`],['耗时',`${run.elapsed_ms} ms`],['归卷柜号',run.cabinets.map((item) => item.id).join('、')]]));
 }
 
-export const stages = {intake, assignment, pairing, gradient, episodes, audit, archive};
+function statePill(code) {
+  return state(code);
+}
+
+function spacingForm(run) {
+  const host = q('#remeasure-rows');
+  host.replaceChildren();
+  for (const cabinet of run.cabinets) {
+    const block = el('fieldset',null,'spacing-cabinet');
+    const legend = el('legend',`${cabinet.id} · 建档间距 ${cabinet.upper_mm - cabinet.lower_mm} mm`);
+    const upper = el('input'); upper.type = 'number'; upper.name = `${cabinet.id}.upper_mm`;
+    upper.min = '150'; upper.max = '5000'; upper.value = cabinet.upper_mm; upper.required = true;
+    const lower = el('input'); lower.type = 'number'; lower.name = `${cabinet.id}.lower_mm`;
+    lower.min = '0'; lower.max = '4500'; lower.value = cabinet.lower_mm; lower.required = true;
+    const evidence = el('input'); evidence.name = `${cabinet.id}.evidence`; evidence.maxLength = '200';
+    evidence.placeholder = '复尺证据编号'; evidence.required = true;
+    const measurer = el('input'); measurer.name = `${cabinet.id}.measurer`; measurer.maxLength = '64';
+    measurer.placeholder = '测量人'; measurer.required = true;
+    const grid = el('div',null,'spacing-grid');
+    const lab = (text, input) => { const label = el('label',text); label.append(input); return label; };
+    grid.append(lab('上层高度 mm',upper), lab('下层高度 mm',lower), lab('证据编号',evidence), lab('测量人',measurer));
+    block.append(legend, grid);
+    host.append(block);
+  }
+}
+
+function spacingConclusion(report) {
+  const target = q('#spacing-conclusion');
+  q('#spacing-conclusion-meta').textContent = report.measure_no ?? '—';
+  if (report.status === 'REJECTED') {
+    const box = el('div',null,'spacing-reject');
+    box.append(el('p',report.message,'fault'));
+    box.append(entries([['复尺单号',report.measure_no],['处理','保留旧版尺寸与原读数，旧证未改动']]));
+    const checks = el('table',null,'ledger');
+    const head = checks.createTHead().insertRow();
+    for (const name of ['展柜','上层 mm','下层 mm','证据','测量人','核验']) head.append(el('th',name));
+    const body = checks.createTBody();
+    for (const item of report.evidence_checks) {
+      const row = body.insertRow();
+      for (const value of [item.cabinet,item.upper_mm,item.lower_mm,item.evidence || '—',item.measurer || '—']) {
+        row.insertCell().textContent = value ?? '—';
+      }
+      row.insertCell().append(statePill(item.status));
+    }
+    box.append(checks);
+    target.replaceChildren(box);
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  // 每柜尺寸与判级变化
+  for (const cabinet of report.cabinets) {
+    const block = el('section',null,'spacing-block');
+    block.append(entries([
+      ['展柜',`${cabinet.cabinet} · ${cabinet.label}`],
+      ['间距',`${cabinet.before_gap_mm} → ${cabinet.after_gap_mm} mm`],
+      ['上下高度',`上 ${cabinet.before_dimensions.upper_mm}/${cabinet.after_dimensions.upper_mm} mm，下 ${cabinet.before_dimensions.lower_mm}/${cabinet.after_dimensions.lower_mm} mm`],
+      ['复尺证据',`${cabinet.evidence} · ${cabinet.measurer}`],
+      ['判级变化柜时',String(cabinet.changed_hours)],
+      ['稳定/异常/缺证',`${cabinet.hours_before.stable}/${cabinet.hours_before.abnormal}/${cabinet.hours_before.missing} → ${cabinet.hours_after.stable}/${cabinet.hours_after.abnormal}/${cabinet.hours_after.missing}`],
+    ]));
+    if (cabinet.grade_changes.length) {
+      block.append(el('h3','改判柜时','spacing-subhead'));
+      const grid = el('table',null,'ledger');
+      const head = grid.createTHead().insertRow();
+      for (const name of ['柜时','原判级','新判级','原间距 mm','新间距 mm','上层原行','下层原行']) head.append(el('th',name));
+      const body = grid.createTBody();
+      for (const change of cabinet.grade_changes) {
+        const row = body.insertRow();
+        row.insertCell().textContent = hour(change.hour);
+        row.insertCell().append(statePill(change.before_state));
+        row.insertCell().append(statePill(change.after_state));
+        row.insertCell().textContent = change.before_gap_mm;
+        row.insertCell().textContent = change.after_gap_mm;
+        row.insertCell().textContent = rowLabel(change.upper);
+        row.insertCell().textContent = rowLabel(change.lower);
+      }
+      block.append(grid);
+    } else {
+      block.append(el('p','该柜无柜时判级变化。','empty'));
+    }
+    fragment.append(block);
+  }
+
+  // 持续异常变化
+  const episodes = report.episodes;
+  const episodeBox = el('section',null,'spacing-block');
+  episodeBox.append(el('h3','持续异常核对','spacing-subhead'));
+  const epRows = [
+    ...episodes.created.map((item) => ['新增',item.id,`${hour(item.start)}–${hour(item.end)}`,item.kind,item.hours]),
+    ...episodes.removed.map((item) => ['消失',item.id,`${hour(item.start)}–${hour(item.end)}`,item.kind,item.hours]),
+    ...episodes.updated.map((item) => ['变更',item.after.id,`${hour(item.after.start)}–${hour(item.after.end)}`,`${item.before.kind}→${item.after.kind}`,`${item.before.hours}→${item.after.hours}`]),
+  ];
+  if (epRows.length) {
+    const grid = el('table',null,'ledger');
+    const head = grid.createTHead().insertRow();
+    for (const name of ['变化','段号','时段','类别','时长 h']) head.append(el('th',name));
+    for (const values of epRows) {
+      const row = grid.createTBody().insertRow();
+      for (const value of values) row.insertCell().textContent = value;
+    }
+    episodeBox.append(grid);
+  } else episodeBox.append(el('p','持续异常段无变化。','empty'));
+  fragment.append(episodeBox);
+
+  // 工单核对变化
+  const ticketBox = el('section',null,'spacing-block');
+  ticketBox.append(el('h3','工单核对变化','spacing-subhead'));
+  if (report.tickets.changed.length) {
+    const grid = el('table',null,'ledger');
+    const head = grid.createTHead().insertRow();
+    for (const name of ['工单','展柜','时刻','原核对','新核对','原关联段','新关联段']) head.append(el('th',name));
+    const body = grid.createTBody();
+    for (const item of report.tickets.changed) {
+      const row = body.insertRow();
+      row.insertCell().textContent = item.ticket;
+      row.insertCell().textContent = item.cabinet;
+      row.insertCell().textContent = stamp(item.at_utc);
+      row.insertCell().append(statePill(item.before_code));
+      row.insertCell().append(statePill(item.after_code));
+      row.insertCell().textContent = item.before_episode ?? '—';
+      row.insertCell().textContent = item.after_episode ?? '—';
+    }
+    ticketBox.append(grid);
+  } else ticketBox.append(el('p','工单核对结论无变化。','empty'));
+  ticketBox.append(entries([
+    ['未报持续段（原）',report.tickets.before_unreported.join('、') || '无'],
+    ['未报持续段（新）',report.tickets.after_unreported.join('、') || '无'],
+    ['新增缺工单',report.tickets.unreported_added.join('、') || '无'],
+    ['已核销缺工单',report.tickets.unreported_cleared.join('、') || '无'],
+  ]));
+  fragment.append(ticketBox);
+
+  // 守恒总账
+  const ledger = el('section',null,'spacing-block');
+  const hb = report.hours_before, ha = report.hours_after;
+  ledger.append(el('h3','柜时总账（全班同一版尺寸）','spacing-subhead'));
+  ledger.append(entries([
+    ['稳定',`${hb.stable} → ${ha.stable}`], ['异常',`${hb.abnormal} → ${ha.abnormal}`],
+    ['缺证',`${hb.missing} → ${ha.missing}`], ['应监测',`${hb.expected} → ${ha.expected}`],
+    ['基线结果摘要',report.baseline_result_sha256.slice(0,16)],
+    ['新版结果摘要',report.revised_result_sha256.slice(0,16)],
+  ]));
+  fragment.append(ledger);
+  target.replaceChildren(fragment);
+}
+
+async function spacing({get, base, run, signal}) {
+  spacingForm(run);
+  const form = q('#spacing-form');
+  const historyHost = q('#spacing-history');
+
+  async function loadHistory(activeId = null) {
+    const records = await get(`${base}/spacing/reviews`);
+    if (signal.aborted) return;
+    if (!records.length) {
+      historyHost.replaceChildren(el('p','暂无复核版本。','empty'));
+      return;
+    }
+    const list = el('div',null,'history-list');
+    for (const item of records) {
+      const lineBox = el('div',null,'spacing-history-row');
+      const row = el('button',`${item.measure_no} · ${item.status === 'PUBLISHED' ? '正式' : '未通过'}`,'table-action');
+      row.type = 'button';
+      if (item.id === activeId) row.setAttribute('aria-pressed','true');
+      row.addEventListener('click',() => spacingConclusion(item.report));
+      lineBox.append(row);
+      if (item.status === 'PUBLISHED') {
+        const verifyBtn = el('button','复算','table-action');
+        verifyBtn.type = 'button';
+        verifyBtn.addEventListener('click', async () => {
+          verifyBtn.disabled = true;
+          try {
+            const result = await fetch(`${base}/spacing/reviews/${item.id}/verify`,{method:'POST',signal});
+            const body = await result.json();
+            if (!result.ok) throw new Error(body?.message || '复算未通过');
+            q('#feedback').hidden = false;
+            q('#feedback').classList.remove('error');
+            q('#feedback').textContent = `复算一致 · ${body.result_sha256.slice(0,12)}`;
+          } catch (error) {
+            if (signal.aborted) return;
+            q('#feedback').hidden = false;
+            q('#feedback').classList.add('error');
+            q('#feedback').textContent = error.message;
+          } finally {
+            verifyBtn.disabled = false;
+          }
+        });
+        lineBox.append(verifyBtn);
+      }
+      list.append(lineBox, el('p',`${stamp(item.created)} · ${item.id.slice(0,12)}`,'mono'));
+    }
+    historyHost.replaceChildren(list);
+    const latest = records[records.length - 1];
+    if (activeId === null) spacingConclusion(latest.report);
+  }
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const data = new FormData(form);
+    const cabinets = run.cabinets.map((cabinet) => {
+      const prefix = `${cabinet.id}.`;
+      const upper = data.get(prefix + 'upper_mm');
+      const lower = data.get(prefix + 'lower_mm');
+      return {cabinet: cabinet.id,
+        upper_mm: upper === '' ? null : Number(upper),
+        lower_mm: lower === '' ? null : Number(lower),
+        evidence: (data.get(prefix + 'evidence') ?? '').toString().trim(),
+        measurer: (data.get(prefix + 'measurer') ?? '').toString().trim()};
+    });
+    const payload = {measure_no: data.get('measure_no'), cabinets};
+    q('#feedback').hidden = false;
+    q('#feedback').classList.remove('error');
+    q('#feedback').textContent = '正在复算整班判级、持续异常与工单…';
+    try {
+      const response = await fetch(`${base}/spacing/reviews`,{method:'POST',
+        headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload), signal});
+      const body = await response.json();
+      if (!response.ok) throw new Error(body?.message || body?.report?.message || '复核未通过，已保留旧版。');
+      q('#feedback').classList.remove('error');
+      q('#feedback').textContent = body.reused ? '同一复尺单，复用既有结论，未新增版本。' : '正式复核结论已生成，全班启用同一版尺寸。';
+      spacingConclusion(body.report);
+      await loadHistory(body.review_id);
+    } catch (error) {
+      if (signal.aborted) return;
+      q('#feedback').classList.add('error');
+      q('#feedback').textContent = error.message;
+      // 失败也刷新留痕，并展示失败登记内容（错误响应体里带 report）
+      const failed = await fetch(`${base}/spacing/reviews`,{signal}).then((r) => r.json());
+      const latest = failed[failed.length - 1];
+      if (latest) spacingConclusion(latest.report);
+      await loadHistory();
+    }
+  },{signal});
+
+  await loadHistory();
+}
+
+export const stages = {intake, assignment, pairing, gradient, episodes, audit, spacing, archive};

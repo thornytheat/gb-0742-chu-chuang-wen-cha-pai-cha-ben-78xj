@@ -13,6 +13,7 @@
 | M5 异常持续 | 定位连续与瞬时异常段及其原行 | `GET /api/runs/{run_id}/episodes/{cabinet}` | `app/modules/episodes/segment.py` | `tests/test_episodes.py` |
 | M6 值班单勾稽 | 核对柜时与图档行，查报警误报漏报 | `GET /api/runs/{run_id}/audit` | `app/modules/audit/reconcile.py` | `tests/test_audit.py` |
 | M7 证据归卷 | 运行、复算或下载带摘要的归卷 | `POST /api/runs` `POST /api/runs/{run_id}/rerun` `GET /api/runs/{run_id}/export` | `app/modules/archive/pipeline.py` `app/modules/archive/service.py` `app/modules/archive/proof.py` `app/store.py` | `tests/test_archive.py` |
+| M8 间距复核 | 登记复尺，逐柜核对改判、持续异常与工单，留痕版本 | `POST /api/runs/{run_id}/spacing/reviews` `GET .../spacing/reviews` `POST .../reviews/{id}/verify` | `app/modules/spacing/review.py` `app/modules/spacing/service.py` `app/modules/spacing/store.py` | `tests/test_spacing.py` `tests/test_spacing_api.py` |
 
 ## 陷阱登记
 
@@ -36,6 +37,18 @@
 | TRAP-25 | 在混合部署契约上叠加同柜同层窗 | 任选一个探头 | 标重叠并拒用重叠段 | `app/modules/assignment/windows.py` | `tests/test_assignment.py::test_second_probe_at_same_position_marks_overlap_only` |
 
 真实反例还有迁移前一分钟的下层读数不能与迁移后的上层配对，近中点无证读数不能挤掉同小时有效候选，区间端点的展示舍入不能改变判级，缺证切断连续异常，工单不能重复清销同一段。
+
+## 间距复核要点
+
+| 要点 | 说明 | 处理位置 | 测试 |
+|---|---|---|---|
+| 整班同版 | 只对证据完整且间距变化的展柜换新尺寸，复算配准之后的全链路，避免前后柜时两套间距 | `spacing/review.py::build_revision` | `tests/test_spacing.py` |
+| 单层剔除 | 只有单层尺寸在核验阶段判 `SINGLE_LAYER`，不生成正式结论 | `spacing/model.py` `spacing/review.py::validate_request` | `test_single_layer_cabinet_cannot_enter_conclusion` |
+| 证据不全 | 证据编号或测量人为空判 `INCOMPLETE`，失败保留旧版并留痕 | `spacing/service.py` | `test_incomplete_evidence_batch_is_rejected_without_publishing` |
+| 旧证留存 | 原始归卷建档尺寸与原读数不改写，复核版本只增不改，记录基线形成版本链 | `spacing/store.py` `spacing/service.py` | `test_second_published_review_chains_baseline_and_keeps_first` |
+| 重跑幂等 | 请求内容 SHA-256 指纹去重，同一复尺单重跑返回既有结论，不新增版本 | `spacing/store.py` | `test_same_remeasure_rerun_returns_same_review_without_new_version` |
+| 段号漂移 | 异常段号按柜内顺序编排，按柜号＋起止时刻定位同一段，避免把重排误报成新增/消失 | `spacing/review.py::_episode_changes` | `test_episode_and_ticket_reconciliation_follow_the_same_dimensions` |
+| 复算防伪 | 按固定原档重建复核契约复算，比对结果与契约摘要，篡改报 `REVIEW_DRIFT` | `spacing/review.py::verify_revision` | `test_verify_recomputes_revised_evidence_and_detects_tampering` |
 
 ## 对账规则
 

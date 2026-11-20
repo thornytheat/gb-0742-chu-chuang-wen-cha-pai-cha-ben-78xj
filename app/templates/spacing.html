@@ -1,0 +1,25 @@
+<div class="triple split-records">
+  <section class="panel">
+    <div class="panel__head"><h2>复尺登记</h2><span>闭馆后复核</span></div>
+    <div class="panel__body">
+      <form id="spacing-form" class="stacked-form">
+        <label>复尺单号 <input id="measure-no" name="measure_no" required maxlength="64" placeholder="如 RM-261120-01"></label>
+        <div id="remeasure-rows"></div>
+        <button class="button fill" type="submit">生成间距复核结论</button>
+      </form>
+      <p id="spacing-form-note" class="empty">两层高度须同时登记并附证据编号与测量人；只有单层尺寸或证据不全的展柜不进入正式结论。</p>
+    </div>
+  </section>
+  <section class="panel wide-pane">
+    <div class="panel__head"><h2>复核结论 <sup>1</sup></h2><span id="spacing-conclusion-meta">尚未生成</span></div>
+    <div id="spacing-conclusion" class="scroll panel__body"><p class="empty">提交复尺登记后，在此查看每柜判级、持续异常与工单核对变化。</p></div>
+  </section>
+  <section class="panel">
+    <div class="panel__head"><h2>版本留痕</h2><span>旧证不抹除</span></div>
+    <div id="spacing-history" class="scroll panel__body"></div>
+  </section>
+</div>
+<ol class="footnotes">
+  <li>正式结论对整班统一换新尺寸，判级、持续异常、工单与归卷使用同一版；原始读数、旧尺寸与失败登记全部留存。</li>
+  <li>同一复尺单重复提交不新增版本；失败登记保留旧版尺寸，不影响已归卷证据。</li>
+</ol>
